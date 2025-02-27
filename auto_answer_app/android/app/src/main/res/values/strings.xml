@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Auto Answer Call</string>
+    <string name="accessibility_service_label">Auto Answer Call</string>
+    <string name="accessibility_service_description">Automatically answers incoming calls and controls speaker based on your settings.</string>
+</resources> 
