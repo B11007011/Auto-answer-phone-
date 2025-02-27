@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 void main() {
   runApp(const MyApp());
@@ -18,8 +19,159 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const MyHomePage(),
+      home: const PasswordCheckWrapper(),
     );
+  }
+}
+
+class PasswordCheckWrapper extends StatefulWidget {
+  const PasswordCheckWrapper({super.key});
+
+  @override
+  State<PasswordCheckWrapper> createState() => _PasswordCheckWrapperState();
+}
+
+class _PasswordCheckWrapperState extends State<PasswordCheckWrapper> {
+  bool _isPasswordRequired = false;
+  bool _isPasswordVerified = false;
+  static const String _defaultPassword = "autoanswer2024";
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPasswordRequirement();
+  }
+
+  Future<void> _checkPasswordRequirement() async {
+    final prefs = await SharedPreferences.getInstance();
+    final firstUseTime = prefs.getInt('first_use_time');
+    final isVerified = prefs.getBool('is_permanently_verified') ?? false;
+
+    if (firstUseTime == null) {
+      // First time using the app
+      await prefs.setInt(
+          'first_use_time', DateTime.now().millisecondsSinceEpoch);
+      setState(() {
+        _isPasswordVerified = true;
+      });
+      return;
+    }
+
+    if (isVerified) {
+      setState(() {
+        _isPasswordVerified = true;
+      });
+      return;
+    }
+
+    final fifteenDaysInMillis =
+        15 * 24 * 60 * 60 * 1000; // 15 days in milliseconds
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final timeSinceFirstUse = now - firstUseTime;
+
+    if (timeSinceFirstUse >= fifteenDaysInMillis) {
+      setState(() {
+        _isPasswordRequired = true;
+      });
+    } else {
+      setState(() {
+        _isPasswordVerified = true;
+      });
+    }
+  }
+
+  Future<void> _verifyPassword(String password) async {
+    if (password == _defaultPassword) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_permanently_verified', true);
+      setState(() {
+        _isPasswordVerified = true;
+        _isPasswordRequired = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isPasswordRequired && !_isPasswordVerified) {
+      return PasswordScreen(onVerify: _verifyPassword);
+    }
+    return const MyHomePage();
+  }
+}
+
+class PasswordScreen extends StatefulWidget {
+  final Function(String) onVerify;
+
+  const PasswordScreen({super.key, required this.onVerify});
+
+  @override
+  State<PasswordScreen> createState() => _PasswordScreenState();
+}
+
+class _PasswordScreenState extends State<PasswordScreen> {
+  final _passwordController = TextEditingController();
+  String _errorText = '';
+
+  void _submitPassword() {
+    final password = _passwordController.text.trim();
+    if (password.isEmpty) {
+      setState(() {
+        _errorText = 'Password cannot be empty';
+      });
+      return;
+    }
+    widget.onVerify(password);
+    if (mounted && password != "autoanswer2024") {
+      setState(() {
+        _errorText = 'Incorrect password';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Password Required'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'This app requires password verification after 15 days of use.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'Enter Password',
+                errorText: _errorText.isNotEmpty ? _errorText : null,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submitPassword(),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _submitPassword,
+              child: const Text('Verify Password'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
   }
 }
 
