@@ -17,7 +17,7 @@ allprojects {
         mavenCentral()
     }
     
-    // Add 32-bit compatibility for all projects
+    // Simple configuration for all projects
     afterEvaluate {
         if (it.hasProperty('android')) {
             it.android {

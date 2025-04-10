@@ -42,8 +42,12 @@ android {
         main.java.srcDirs += 'src/main/kotlin'
     }
 
+    // Multi-architecture configuration
     packagingOptions {
-        jniLibs.useLegacyPackaging = true
+        // Don't exclude any architectures
+        jniLibs.useLegacyPackaging = false
+        // Avoid duplicate files
+        pickFirst '**/*.so'
     }
 
     defaultConfig {
@@ -56,9 +60,19 @@ android {
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         
-        // Using only 32-bit architecture for Samsung compatibility
+        // Support all architectures
         ndk {
-            abiFilters 'armeabi-v7a', 'x86'
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
+    }
+
+    // Configure APK splitting to support all architectures
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+            universalApk true
         }
     }
 
@@ -79,7 +93,7 @@ flutter {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation "androidx.appcompat:appcompat:1.6.1"
     implementation "com.google.android.material:material:1.11.0"

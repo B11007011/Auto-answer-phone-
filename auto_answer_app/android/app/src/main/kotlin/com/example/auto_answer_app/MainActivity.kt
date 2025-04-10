@@ -24,27 +24,16 @@ class MainActivity: FlutterActivity() {
     private val PERMISSION_REQUEST_CODE = 123
     private val handler = Handler(Looper.getMainLooper())
 
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        handler.postDelayed({
+            requestRequiredPermissions()
+        }, 2000)
+    }
+    
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        try {
-            super.configureFlutterEngine(flutterEngine)
-            
-            // Register plugins with the Flutter engine
-            try {
-                GeneratedPluginRegistrant.registerWith(flutterEngine)
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Error registering plugins: ${e.message}")
-            }
-            
-            // Delay permission requests to avoid startup crashes
-            handler.postDelayed({
-                requestRequiredPermissions()
-            }, 1000)
-            
-            // Set up method channel
-            setupMethodChannel(flutterEngine)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error in configureFlutterEngine: ${e.message}")
-        }
+        super.configureFlutterEngine(flutterEngine)
+        setupMethodChannel(flutterEngine)
     }
     
     private fun setupMethodChannel(flutterEngine: FlutterEngine) {
