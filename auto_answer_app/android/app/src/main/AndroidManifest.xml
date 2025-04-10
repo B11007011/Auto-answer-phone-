@@ -11,10 +11,19 @@
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     
+    <!-- Support 32-bit and 64-bit devices -->
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:anyDensity="true" />
+    
     <application
         android:label="Auto Answer Call"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:name=".AutoAnswerApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:extractNativeLibs="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

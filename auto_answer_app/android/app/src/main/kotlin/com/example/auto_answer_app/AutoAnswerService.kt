@@ -10,6 +10,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.util.Log
 import android.view.accessibility.AccessibilityWindowInfo
+import android.content.Context
+import android.media.AudioManager
 
 class AutoAnswerService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -17,6 +19,13 @@ class AutoAnswerService : AccessibilityService() {
     private val TAG = "AutoAnswerService"
     private var lastEventTime = 0L
     private val COOLDOWN_TIME = 500L // 500ms cooldown
+    private lateinit var audioManager: AudioManager
+
+    override fun onCreate() {
+        super.onCreate()
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        Log.d(TAG, "AutoAnswerService created")
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val currentTime = System.currentTimeMillis()
@@ -60,6 +69,20 @@ class AutoAnswerService : AccessibilityService() {
                 Log.d(TAG, "Skipping event, still in cooldown (${currentTime - lastEventTime}ms)")
             }
         }
+        
+        // Also check for in-call UI to enable speaker
+        if (isCallRelatedPackage(packageName) && 
+            (eventType == "TYPE_WINDOW_STATE_CHANGED" || 
+             eventType == "TYPE_WINDOW_CONTENT_CHANGED")) {
+            // Get the speaker setting
+            val prefs = applicationContext.getSharedPreferences("auto_answer_settings", Context.MODE_PRIVATE)
+            val speakerEnabled = prefs.getBoolean("speaker_enabled", false)
+            
+            if (speakerEnabled) {
+                Log.d(TAG, "Call UI detected, checking for speaker button")
+                checkAndEnableSpeaker()
+            }
+        }
     }
 
     private fun isCallRelatedPackage(packageName: String?): Boolean {
@@ -75,7 +98,10 @@ class AutoAnswerService : AccessibilityService() {
             "com.samsung.android.dialer",
             "com.android.phone",
             "com.android.server.telecom",
-            "com.android.systemui" // For notification shade
+            "com.android.systemui", // For notification shade
+            // Add Xiaomi specific packages
+            "com.xiaomi.incallui",
+            "com.miui.incallui"
         )
         
         val isCallRelated = dialerPackages.any { packageName.contains(it) }
@@ -394,6 +420,105 @@ class AutoAnswerService : AccessibilityService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error dumping hierarchy at level $level", e)
+        }
+    }
+
+    private fun findNodeByText(root: AccessibilityNodeInfo, texts: List<String>): AccessibilityNodeInfo? {
+        for (text in texts) {
+            root.findAccessibilityNodeInfosByText(text).firstOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    private fun checkAndEnableSpeaker() {
+        try {
+            // 1. Try enabling speaker using AudioManager
+            enableSpeakerphone()
+            
+            // 2. Try to find and click the speaker button in UI
+            val root = rootInActiveWindow
+            if (root != null) {
+                // Look for speaker button by ID
+                val speakerButtonIds = listOf(
+                    "com.android.dialer:id/speaker_button",
+                    "com.android.incallui:id/speaker_button",
+                    "com.google.android.dialer:id/speaker_button",
+                    "com.xiaomi.incallui:id/speaker_button",
+                    "com.miui.incallui:id/speaker_button",
+                    "speaker_button"
+                )
+                
+                var speakerButton = speakerButtonIds.firstNotNullOfOrNull { id ->
+                    root.findAccessibilityNodeInfosByViewId(id).firstOrNull()
+                }
+                
+                // If no button found by ID, try to find by text
+                if (speakerButton == null) {
+                    speakerButton = findNodeByText(root, listOf(
+                        "Speaker", "SPEAKER", "Speakerphone", "SPEAKERPHONE",
+                        "擴音", "扬声器", "扬聲器", "喇叭" // Chinese for Xiaomi
+                    ))
+                }
+                
+                if (speakerButton != null && speakerButton.isClickable) {
+                    Log.d(TAG, "Found speaker button, clicking it")
+                    speakerButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                } else {
+                    Log.d(TAG, "Speaker button not found or not clickable")
+                }
+                
+                root.recycle()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enabling speaker: ${e.message}")
+        }
+    }
+    
+    private fun enableSpeakerphone() {
+        try {
+            // Try multiple approaches with different delays
+            val delayTimes = listOf(0L, 1000L, 2000L, 3000L)
+            
+            for ((index, delay) in delayTimes.withIndex()) {
+                handler.postDelayed({
+                    try {
+                        // Standard approach
+                        audioManager.mode = AudioManager.MODE_IN_CALL
+                        audioManager.isSpeakerphoneOn = true
+                        
+                        // Alternative approach for some devices
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            try {
+                                audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION)
+                                audioManager.isSpeakerphoneOn = true
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error setting MODE_IN_COMMUNICATION: ${e.message}")
+                            }
+                        }
+                        
+                        // Xiaomi specific approach using reflection
+                        try {
+                            val audioSystem = Class.forName("android.media.AudioSystem")
+                            val setForceUse = audioSystem.getMethod("setForceUse", Int::class.java, Int::class.java)
+                            
+                            // Constants from AudioSystem
+                            val FOR_COMMUNICATION = 0
+                            val FORCE_SPEAKER = 1
+                            
+                            setForceUse.invoke(null, FOR_COMMUNICATION, FORCE_SPEAKER)
+                            Log.d(TAG, "Applied Xiaomi-specific speaker method")
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Alternative speaker method not available: ${e.message}")
+                        }
+                        
+                        Log.d(TAG, "Speaker enabled (attempt ${index + 1})")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to enable speaker on attempt ${index + 1}: ${e.message}")
+                    }
+                }, delay)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in enableSpeakerphone: ${e.message}")
         }
     }
 

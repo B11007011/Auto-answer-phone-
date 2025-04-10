@@ -30,16 +30,20 @@ android {
     compileSdkVersion 34
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
     }
 
     kotlinOptions {
-        jvmTarget = '17'
+        jvmTarget = '11'
     }
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    packagingOptions {
+        jniLibs.useLegacyPackaging = true
     }
 
     defaultConfig {
@@ -51,8 +55,10 @@ android {
         targetSdkVersion 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        
+        // Using only 32-bit architecture for Samsung compatibility
         ndk {
-            abiFilters 'x86_64', 'arm64-v8a', 'armeabi-v7a'
+            abiFilters 'armeabi-v7a', 'x86'
         }
     }
 
@@ -64,15 +70,6 @@ android {
         }
         debug {
             signingConfig signingConfigs.debug
-        }
-    }
-
-    splits {
-        abi {
-            enable true
-            reset()
-            include 'x86_64', 'arm64-v8a', 'armeabi-v7a'
-            universalApk true
         }
     }
 }
