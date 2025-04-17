@@ -99,9 +99,13 @@ class AutoAnswerService : AccessibilityService() {
             "com.android.phone",
             "com.android.server.telecom",
             "com.android.systemui", // For notification shade
-            // Add Xiaomi specific packages
+            // Xiaomi specific packages - enhanced for F22 Pro
             "com.xiaomi.incallui",
-            "com.miui.incallui"
+            "com.miui.incallui",
+            "com.miui.phone",
+            "com.miui.voiceassist",
+            "com.xiaomi.phone",
+            "com.xiaomi.voip"
         )
         
         val isCallRelated = dialerPackages.any { packageName.contains(it) }
@@ -432,56 +436,131 @@ class AutoAnswerService : AccessibilityService() {
 
     private fun checkAndEnableSpeaker() {
         try {
-            // 1. Try enabling speaker using AudioManager
+            Log.d(TAG, "Running checkAndEnableSpeaker()")
+            
+            // 1. Try enabling speaker using AudioManager - with multiple attempts
             enableSpeakerphone()
             
             // 2. Try to find and click the speaker button in UI
             val root = rootInActiveWindow
             if (root != null) {
-                // Look for speaker button by ID
+                // Look for speaker button by ID - added more Xiaomi/MIUI specific IDs
                 val speakerButtonIds = listOf(
                     "com.android.dialer:id/speaker_button",
                     "com.android.incallui:id/speaker_button",
                     "com.google.android.dialer:id/speaker_button",
                     "com.xiaomi.incallui:id/speaker_button",
                     "com.miui.incallui:id/speaker_button",
-                    "speaker_button"
+                    "com.miui.phone:id/speaker_button",
+                    "com.xiaomi.phone:id/speaker_button", 
+                    "com.xiaomi.incallui:id/ivSpeaker",
+                    "com.miui.incallui:id/ivSpeaker",
+                    "speaker_button",
+                    "btnSpeaker",
+                    "button_speakerphone",
+                    "ivSpeaker",    // Common Xiaomi ID
+                    "speakerphone", // Possible ID on some Xiaomi phones
+                    "audio_button", // Some MIUI versions use this
+                    "audioButton"
                 )
                 
                 var speakerButton = speakerButtonIds.firstNotNullOfOrNull { id ->
-                    root.findAccessibilityNodeInfosByViewId(id).firstOrNull()
+                    try {
+                        val nodes = root.findAccessibilityNodeInfosByViewId(id)
+                        Log.d(TAG, "Searching for $id: found ${nodes.size} nodes")
+                        nodes.firstOrNull()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error searching for ID $id: ${e.message}")
+                        null
+                    }
                 }
                 
-                // If no button found by ID, try to find by text
+                // If no button found by ID, try to find by text or content description
                 if (speakerButton == null) {
+                    Log.d(TAG, "No speaker button found by ID, searching by text")
                     speakerButton = findNodeByText(root, listOf(
-                        "Speaker", "SPEAKER", "Speakerphone", "SPEAKERPHONE",
-                        "擴音", "扬声器", "扬聲器", "喇叭" // Chinese for Xiaomi
+                        "Speaker", "SPEAKER", "Speakerphone", "SPEAKERPHONE", 
+                        "Speaker on", "Turn on speaker", "Enable speaker",
+                        "擴音", "扬声器", "扬聲器", "喇叭", "免提", "开启扬声器" // Chinese for Xiaomi/MIUI
                     ))
                 }
                 
-                if (speakerButton != null && speakerButton.isClickable) {
-                    Log.d(TAG, "Found speaker button, clicking it")
-                    speakerButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                // Try to find by content description
+                if (speakerButton == null) {
+                    Log.d(TAG, "Searching for speaker button by accessibility tree")
+                    speakerButton = findSpeakerButtonByAccessibilityTree(root)
+                }
+                
+                if (speakerButton != null) {
+                    if (speakerButton.isClickable) {
+                        Log.d(TAG, "Found speaker button, clicking it")
+                        speakerButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    } else if (speakerButton.parent?.isClickable == true) {
+                        Log.d(TAG, "Speaker button not clickable, trying parent")
+                        speakerButton.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    } else {
+                        Log.d(TAG, "Speaker button and parent not clickable")
+                    }
                 } else {
-                    Log.d(TAG, "Speaker button not found or not clickable")
+                    Log.d(TAG, "Speaker button not found in UI")
                 }
                 
                 root.recycle()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error enabling speaker: ${e.message}")
+            Log.e(TAG, "Error enabling speaker: ${e.message}", e)
         }
+    }
+    
+    private fun findSpeakerButtonByAccessibilityTree(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        try {
+            val queue = mutableListOf<AccessibilityNodeInfo>()
+            queue.add(root)
+            
+            while (queue.isNotEmpty()) {
+                val node = queue.removeAt(0)
+                
+                // Check if this could be a speaker button based on various clues
+                val className = node.className?.toString() ?: ""
+                val contentDesc = node.contentDescription?.toString()?.lowercase() ?: ""
+                val text = node.text?.toString()?.lowercase() ?: ""
+                
+                // These keywords might indicate a speaker button
+                val speakerKeywords = listOf("speaker", "audio", "sound", "扬声器", "擴音", "喇叭", "免提")
+                
+                // Check if this might be a speaker button
+                val isSpeakerRelated = speakerKeywords.any { keyword -> 
+                    contentDesc.contains(keyword) || text.contains(keyword) 
+                }
+                
+                // If it's likely a speaker button and is clickable
+                if (isSpeakerRelated && (node.isClickable || node.parent?.isClickable == true)) {
+                    Log.d(TAG, "Found potential speaker button by tree search: $className, text: $text, desc: $contentDesc")
+                    return node
+                }
+                
+                // Check children
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { queue.add(it) }
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in findSpeakerButtonByAccessibilityTree: ${e.message}")
+        }
+        return null
     }
     
     private fun enableSpeakerphone() {
         try {
-            // Try multiple approaches with different delays
-            val delayTimes = listOf(0L, 1000L, 2000L, 3000L)
+            // Try multiple approaches with different delays - more aggressive for Xiaomi devices
+            val delayTimes = listOf(0L, 500L, 1000L, 1500L, 2000L, 3000L)
             
             for ((index, delay) in delayTimes.withIndex()) {
                 handler.postDelayed({
                     try {
+                        Log.d(TAG, "Attempting to enable speaker (attempt ${index + 1})")
+                        
                         // Standard approach
                         audioManager.mode = AudioManager.MODE_IN_CALL
                         audioManager.isSpeakerphoneOn = true
@@ -496,7 +575,7 @@ class AutoAnswerService : AccessibilityService() {
                             }
                         }
                         
-                        // Xiaomi specific approach using reflection
+                        // Xiaomi specific approach using reflection - enhanced for F22 Pro
                         try {
                             val audioSystem = Class.forName("android.media.AudioSystem")
                             val setForceUse = audioSystem.getMethod("setForceUse", Int::class.java, Int::class.java)
@@ -507,6 +586,16 @@ class AutoAnswerService : AccessibilityService() {
                             
                             setForceUse.invoke(null, FOR_COMMUNICATION, FORCE_SPEAKER)
                             Log.d(TAG, "Applied Xiaomi-specific speaker method")
+                            
+                            // Try another method specific to MIUI
+                            try {
+                                // Another set of constants that might work on some Xiaomi devices
+                                val FOR_MEDIA = 1
+                                setForceUse.invoke(null, FOR_MEDIA, FORCE_SPEAKER)
+                                Log.d(TAG, "Applied secondary Xiaomi-specific speaker method")
+                            } catch (e: Exception) {
+                                Log.d(TAG, "Secondary method failed: ${e.message}")
+                            }
                         } catch (e: Exception) {
                             Log.d(TAG, "Alternative speaker method not available: ${e.message}")
                         }

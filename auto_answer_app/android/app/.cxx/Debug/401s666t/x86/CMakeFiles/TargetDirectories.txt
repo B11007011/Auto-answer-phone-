@@ -1,0 +1,2 @@
+C:/Users/USER/OneDrive - gapps.ntust.edu.tw/Desktop/website workspace/Auto-answer-phone-/auto_answer_app/android/app/.cxx/Debug/401s666t/x86/CMakeFiles/edit_cache.dir
+C:/Users/USER/OneDrive - gapps.ntust.edu.tw/Desktop/website workspace/Auto-answer-phone-/auto_answer_app/android/app/.cxx/Debug/401s666t/x86/CMakeFiles/rebuild_cache.dir

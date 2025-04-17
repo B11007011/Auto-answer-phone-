@@ -16,33 +16,11 @@ allprojects {
         google()
         mavenCentral()
     }
-    
-    // Simple configuration for all projects
-    afterEvaluate {
-        if (it.hasProperty('android')) {
-            it.android {
-                compileOptions {
-                    sourceCompatibility JavaVersion.VERSION_11
-                    targetCompatibility JavaVersion.VERSION_11
-                }
-            }
-        }
-        
-        // Set Kotlin JVM target to 11 for all projects
-        if (it.plugins.hasPlugin('kotlin-android') || it.plugins.hasPlugin('org.jetbrains.kotlin.android')) {
-            it.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-                kotlinOptions {
-                    jvmTarget = '11'
-                }
-            }
-        }
-    }
 }
 
 rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
-    project.evaluationDependsOn(':app')
 }
 
 tasks.register("clean", Delete) {

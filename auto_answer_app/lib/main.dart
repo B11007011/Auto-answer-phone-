@@ -187,6 +187,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isPhonePermissionGranted = false;
   bool _autoAnswerEnabled = false;
   bool _speakerEnabled = false;
+  bool _isXiaomiDevice = false;
   final MethodChannel _channel = const MethodChannel('call_control');
 
   @override
@@ -194,6 +195,40 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     _checkPermissions();
     _checkAccessibilityService();
+    _checkIsXiaomiDevice();
+    _loadSavedSettings();
+  }
+
+  Future<void> _checkIsXiaomiDevice() async {
+    final deviceInfo = await getDeviceInfo();
+    setState(() {
+      _isXiaomiDevice = deviceInfo.contains('xiaomi') || 
+                        deviceInfo.contains('redmi') || 
+                        deviceInfo.contains('poco');
+    });
+    debugPrint("Device info: $deviceInfo, isXiaomi: $_isXiaomiDevice");
+  }
+
+  Future<String> getDeviceInfo() async {
+    try {
+      final androidInfo = await _channel.invokeMethod('getDeviceInfo');
+      return androidInfo?.toString().toLowerCase() ?? '';
+    } catch (e) {
+      debugPrint("Failed to get device info: '${e.toString()}'.");
+      return '';
+    }
+  }
+
+  Future<void> _loadSavedSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _autoAnswerEnabled = prefs.getBool('auto_answer_enabled') ?? false;
+        _speakerEnabled = prefs.getBool('speaker_enabled') ?? false;
+      });
+    } catch (e) {
+      debugPrint("Failed to load settings: '${e.toString()}'.");
+    }
   }
 
   Future<void> _checkAccessibilityService() async {
@@ -258,6 +293,26 @@ class _MyHomePageState extends State<MyHomePage> {
       'autoAnswer': _autoAnswerEnabled,
       'speaker': _speakerEnabled,
     });
+  }
+
+  Future<void> _forceSpeakerOn() async {
+    try {
+      await _channel.invokeMethod('forceSpeakerOn');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Speaker mode forced on'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to force speaker mode: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override
@@ -446,6 +501,46 @@ class _MyHomePageState extends State<MyHomePage> {
                           ),
                         ],
                       ),
+                      
+                      // Xiaomi-specific additional option
+                      if (_isXiaomiDevice && _speakerEnabled)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Divider(),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Xiaomi Device Detected',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'If speaker mode is not working during calls, try using the Force Speaker button below.',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: _forceSpeakerOn,
+                                  icon: const Icon(Icons.volume_up, size: 20),
+                                  label: const Text('Force Speaker Mode'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),
