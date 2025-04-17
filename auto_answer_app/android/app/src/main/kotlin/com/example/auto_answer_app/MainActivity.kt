@@ -250,21 +250,96 @@ class MainActivity: FlutterActivity() {
             Log.d("MainActivity", "Forcing speaker mode to prepare for calls")
             audioManager.isSpeakerphoneOn = true
             
-            // Try different audio modes
-            val modes = listOf(
-                AudioManager.MODE_IN_CALL,
-                AudioManager.MODE_IN_COMMUNICATION,
-                AudioManager.MODE_NORMAL
+            // Try to persist the setting through a system property
+            try {
+                if (isXiaomiDevice()) {
+                    val systemProperties = Class.forName("android.os.SystemProperties")
+                    val set = systemProperties.getMethod("set", String::class.java, String::class.java)
+                    
+                    // These properties might be read by MIUI
+                    set.invoke(null, "persist.audio.speaker.force", "1")
+                    set.invoke(null, "persist.sys.audio.speaker", "1")
+                    Log.d("MainActivity", "Set system properties for speaker")
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to set system properties: ${e.message}")
+            }
+            
+            // Try different audio modes - in multiple sequences for Xiaomi
+            val modeSequences = listOf(
+                listOf(AudioManager.MODE_NORMAL, AudioManager.MODE_IN_CALL),
+                listOf(AudioManager.MODE_IN_CALL, AudioManager.MODE_NORMAL),
+                listOf(AudioManager.MODE_NORMAL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_IN_CALL)
             )
             
-            // Try each mode with speaker on
-            for (mode in modes) {
+            // Try each sequence
+            for ((index, sequence) in modeSequences.withIndex()) {
                 try {
-                    audioManager.mode = mode
-                    audioManager.isSpeakerphoneOn = true
-                    Log.d("MainActivity", "Set audio mode $mode with speaker ON")
+                    Log.d("MainActivity", "Trying mode sequence ${index + 1}")
+                    for (mode in sequence) {
+                        audioManager.mode = mode
+                        audioManager.isSpeakerphoneOn = true
+                        Log.d("MainActivity", "Set audio mode $mode with speaker ON")
+                        // Small delay between mode changes
+                        Thread.sleep(50)
+                    }
                 } catch (e: Exception) {
-                    Log.e("MainActivity", "Failed to set audio mode $mode: ${e.message}")
+                    Log.e("MainActivity", "Failed to set mode sequence ${index + 1}: ${e.message}")
+                }
+            }
+            
+            // Special handling for F22 Pro and other modern Xiaomi devices
+            if (isXiaomiDevice()) {
+                try {
+                    Log.d("MainActivity", "Applying F22 Pro specific speaker settings")
+                    
+                    // Force max volume for calls
+                    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                    audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
+                    Log.d("MainActivity", "Set call volume to maximum: $maxVolume")
+                    
+                    // For F22 Pro, set special parameters
+                    val isF22Pro = Build.MODEL.lowercase().contains("f22") &&
+                                   Build.MANUFACTURER.lowercase().contains("xiaomi")
+                    
+                    if (isF22Pro) {
+                        Log.d("MainActivity", "Detected F22 Pro model, applying specialized settings")
+                        
+                        // Special F22 Pro approach - try additional audio routing
+                        try {
+                            // Reset audio focus
+                            val abandonAudioFocus = audioManager.javaClass.getMethod("abandonAudioFocus", 
+                                Class.forName("android.media.AudioManager\$OnAudioFocusChangeListener"))
+                            abandonAudioFocus.invoke(audioManager, null)
+                            Log.d("MainActivity", "Abandoned audio focus to reset audio routing")
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error abandoning audio focus: ${e.message}")
+                        }
+                        
+                        // For F22 Pro hardware
+                        handler.postDelayed({
+                            try {
+                                // Apply again after a delay, as some Xiaomi devices need this
+                                audioManager.mode = AudioManager.MODE_IN_CALL
+                                audioManager.isSpeakerphoneOn = true
+                                Log.d("MainActivity", "Delayed speaker setting applied")
+                                
+                                // Save to settings database directly (requires root, but try anyway)
+                                try {
+                                    val process = Runtime.getRuntime().exec(
+                                        "su -c 'settings put system speakerphone_on 1'")
+                                    process.waitFor()
+                                    Log.d("MainActivity", "Attempted direct system settings update")
+                                } catch (e: Exception) {
+                                    Log.d("MainActivity", "System settings update not available: ${e.message}")
+                                }
+                            } catch (e: Exception) {
+                                Log.e("MainActivity", "Error in delayed speaker setting: ${e.message}")
+                            }
+                        }, 1000)
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error applying F22 Pro specific settings: ${e.message}")
                 }
             }
             
@@ -278,11 +353,32 @@ class MainActivity: FlutterActivity() {
                     // Constants from AudioSystem
                     val FOR_COMMUNICATION = 0
                     val FOR_MEDIA = 1
+                    val FOR_SYSTEM = 2  // Added for Xiaomi
                     val FORCE_SPEAKER = 1
                     
+                    // Reset first
+                    for (type in 0..3) {
+                        setForceUse.invoke(null, type, 0)
+                    }
+                    
+                    // Set all to speaker
                     setForceUse.invoke(null, FOR_COMMUNICATION, FORCE_SPEAKER)
                     setForceUse.invoke(null, FOR_MEDIA, FORCE_SPEAKER)
+                    setForceUse.invoke(null, FOR_SYSTEM, FORCE_SPEAKER)
                     Log.d("MainActivity", "Applied Xiaomi-specific speaker methods")
+                    
+                    // Try MIUI specific methods
+                    try {
+                        val miuiAudioManager = Class.forName("miui.media.AudioManager")
+                        val getInstance = miuiAudioManager.getMethod("getInstance")
+                        val instance = getInstance.invoke(null)
+                        
+                        val setParameter = miuiAudioManager.getMethod("setParameter", String::class.java, String::class.java)
+                        setParameter.invoke(instance, "force_speaker", "1")
+                        Log.d("MainActivity", "Applied MIUI-specific audio parameter for speaker")
+                    } catch (e: Exception) {
+                        Log.d("MainActivity", "MIUI audio manager not available: ${e.message}")
+                    }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Xiaomi-specific methods failed: ${e.message}")
                 }

@@ -12,6 +12,8 @@ import android.util.Log
 import android.view.accessibility.AccessibilityWindowInfo
 import android.content.Context
 import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 
 class AutoAnswerService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -554,50 +556,152 @@ class AutoAnswerService : AccessibilityService() {
     private fun enableSpeakerphone() {
         try {
             // Try multiple approaches with different delays - more aggressive for Xiaomi devices
-            val delayTimes = listOf(0L, 500L, 1000L, 1500L, 2000L, 3000L)
+            val delayTimes = listOf(0L, 300L, 600L, 900L, 1200L, 1800L, 2500L, 3500L, 5000L)
             
             for ((index, delay) in delayTimes.withIndex()) {
                 handler.postDelayed({
                     try {
                         Log.d(TAG, "Attempting to enable speaker (attempt ${index + 1})")
                         
-                        // Standard approach
-                        audioManager.mode = AudioManager.MODE_IN_CALL
-                        audioManager.isSpeakerphoneOn = true
+                        // Force audio routing flags first
+                        try {
+                            // Set max volume for call
+                            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                            audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
+                            Log.d(TAG, "Set call volume to maximum: $maxVolume")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set volume: ${e.message}")
+                        }
                         
-                        // Alternative approach for some devices
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            try {
-                                audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION)
-                                audioManager.isSpeakerphoneOn = true
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error setting MODE_IN_COMMUNICATION: ${e.message}")
+                        // Standard approach - try multiple times in different modes
+                        // First reset mode to normal
+                        audioManager.mode = AudioManager.MODE_NORMAL
+                        Thread.sleep(50)
+                        
+                        // Try in-call mode
+                        try {
+                            audioManager.mode = AudioManager.MODE_IN_CALL
+                            audioManager.isSpeakerphoneOn = true
+                            Log.d(TAG, "Set MODE_IN_CALL with speaker ON")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error setting MODE_IN_CALL: ${e.message}")
+                        }
+                        
+                        // Try communication mode
+                        try {
+                            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                            audioManager.isSpeakerphoneOn = true
+                            Log.d(TAG, "Set MODE_IN_COMMUNICATION with speaker ON")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error setting MODE_IN_COMMUNICATION: ${e.message}")
+                        }
+                        
+                        // Ensure speakerphone is on in normal mode as well
+                        try {
+                            audioManager.mode = AudioManager.MODE_NORMAL
+                            audioManager.isSpeakerphoneOn = true
+                            Log.d(TAG, "Set MODE_NORMAL with speaker ON")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error setting MODE_NORMAL: ${e.message}")
+                        }
+                        
+                        // Special setting for Mi UX/MIUI - F22 Pro specific
+                        try {
+                            // Set routing directly for all audio
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                val commAttr = AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                    .build()
+                                val mediaAttr = AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                    .build()
+                                
+                                // Try to set preferred device for multiple usages
+                                try {
+                                    val speakerDevice = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                                    val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                                    for (device in devices) {
+                                        if (device.type == speakerDevice) {
+                                            audioManager.setPreferredDevice(commAttr, device)
+                                            audioManager.setPreferredDevice(mediaAttr, device)
+                                            Log.d(TAG, "Set preferred device to builtin speaker")
+                                            break
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error setting preferred device: ${e.message}")
+                                }
                             }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error setting communication/media attributes: ${e.message}")
                         }
                         
                         // Xiaomi specific approach using reflection - enhanced for F22 Pro
                         try {
+                            // Xiaomi devices work best with AudioSystem class
                             val audioSystem = Class.forName("android.media.AudioSystem")
                             val setForceUse = audioSystem.getMethod("setForceUse", Int::class.java, Int::class.java)
                             
-                            // Constants from AudioSystem
+                            // Try all possible combinations for Xiaomi devices
+                            val forceTypes = listOf(0, 1, 2, 3) // FOR_COMMUNICATION, FOR_MEDIA, etc.
+                            val forceValues = listOf(0, 1, 2, 3) // FORCE_NONE, FORCE_SPEAKER, etc.
+                            
+                            // First reset all forced usage
+                            for (type in forceTypes) {
+                                setForceUse.invoke(null, type, 0) // Set to FORCE_NONE first
+                            }
+                            
+                            // Then set speaker for all force types
+                            for (type in forceTypes) {
+                                setForceUse.invoke(null, type, 1) // 1 = FORCE_SPEAKER
+                                Log.d(TAG, "Set AudioSystem force use: type=$type, value=1 (FORCE_SPEAKER)")
+                            }
+                            
+                            // Specifically for Xiaomi - must set at least these two
                             val FOR_COMMUNICATION = 0
+                            val FOR_MEDIA = 1
                             val FORCE_SPEAKER = 1
                             
                             setForceUse.invoke(null, FOR_COMMUNICATION, FORCE_SPEAKER)
-                            Log.d(TAG, "Applied Xiaomi-specific speaker method")
+                            setForceUse.invoke(null, FOR_MEDIA, FORCE_SPEAKER)
+                            Log.d(TAG, "Applied Xiaomi-specific speaker methods")
                             
-                            // Try another method specific to MIUI
-                            try {
-                                // Another set of constants that might work on some Xiaomi devices
-                                val FOR_MEDIA = 1
-                                setForceUse.invoke(null, FOR_MEDIA, FORCE_SPEAKER)
-                                Log.d(TAG, "Applied secondary Xiaomi-specific speaker method")
-                            } catch (e: Exception) {
-                                Log.d(TAG, "Secondary method failed: ${e.message}")
-                            }
                         } catch (e: Exception) {
-                            Log.d(TAG, "Alternative speaker method not available: ${e.message}")
+                            Log.d(TAG, "AudioSystem method not available: ${e.message}")
+                        }
+                        
+                        // F22 Pro specific - try to use reflection to access MIUI-specific APIs
+                        try {
+                            val miuiAudioManager = Class.forName("miui.media.AudioManager")
+                            val getInstance = miuiAudioManager.getMethod("getInstance")
+                            val instance = getInstance.invoke(null)
+                            
+                            val setParameter = miuiAudioManager.getMethod("setParameter", String::class.java, String::class.java)
+                            setParameter.invoke(instance, "force_speaker", "1")
+                            Log.d(TAG, "Applied MIUI-specific audio parameter for speaker")
+                        } catch (e: Exception) {
+                            Log.d(TAG, "MIUI audio manager not available: ${e.message}")
+                        }
+                        
+                        // If this is one of the last attempts, try everything again
+                        if (index >= delayTimes.size - 3) {
+                            Log.d(TAG, "Final attempts - trying all methods again")
+                            
+                            // Try once more with normal mode
+                            audioManager.mode = AudioManager.MODE_NORMAL
+                            audioManager.isSpeakerphoneOn = true
+                            
+                            // Toggle airplane mode off/on/off (doesn't require permission)
+                            try {
+                                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                // Force toggle modes to reset audio routing
+                                am.mode = AudioManager.MODE_NORMAL
+                                am.isSpeakerphoneOn = false
+                                Thread.sleep(100)
+                                am.isSpeakerphoneOn = true
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in final audio toggle: ${e.message}")
+                            }
                         }
                         
                         Log.d(TAG, "Speaker enabled (attempt ${index + 1})")

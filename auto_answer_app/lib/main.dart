@@ -188,6 +188,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _autoAnswerEnabled = false;
   bool _speakerEnabled = false;
   bool _isXiaomiDevice = false;
+  bool _isF22ProModel = false;
   final MethodChannel _channel = const MethodChannel('call_control');
 
   @override
@@ -195,24 +196,28 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     _checkPermissions();
     _checkAccessibilityService();
-    _checkIsXiaomiDevice();
+    _checkDeviceInfo();
     _loadSavedSettings();
   }
 
-  Future<void> _checkIsXiaomiDevice() async {
+  Future<void> _checkDeviceInfo() async {
     final deviceInfo = await getDeviceInfo();
     setState(() {
-      _isXiaomiDevice = deviceInfo.contains('xiaomi') || 
-                        deviceInfo.contains('redmi') || 
-                        deviceInfo.contains('poco');
+      _isXiaomiDevice = deviceInfo.toLowerCase().contains('xiaomi') || 
+                        deviceInfo.toLowerCase().contains('redmi') || 
+                        deviceInfo.toLowerCase().contains('poco');
+      
+      // Specifically check for F22 Pro model
+      _isF22ProModel = deviceInfo.toLowerCase().contains('f22') && 
+                        deviceInfo.toLowerCase().contains('xiaomi');
     });
-    debugPrint("Device info: $deviceInfo, isXiaomi: $_isXiaomiDevice");
+    debugPrint("Device info: $deviceInfo, isXiaomi: $_isXiaomiDevice, isF22Pro: $_isF22ProModel");
   }
 
   Future<String> getDeviceInfo() async {
     try {
       final androidInfo = await _channel.invokeMethod('getDeviceInfo');
-      return androidInfo?.toString().toLowerCase() ?? '';
+      return androidInfo?.toString() ?? '';
     } catch (e) {
       debugPrint("Failed to get device info: '${e.toString()}'.");
       return '';
@@ -328,6 +333,63 @@ class _MyHomePageState extends State<MyHomePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              // F22 Pro specific message at the top if detected
+              if (_isF22ProModel)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 20),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade300),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.phone_android, color: Colors.blue.shade700),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Xiaomi F22 Pro Detected',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue.shade700,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'For your device, use the Force Speaker button before answering calls to ensure speaker mode works correctly.',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _forceSpeakerOn,
+                          icon: const Icon(Icons.volume_up, size: 24),
+                          label: const Text(
+                            'Force Speaker Mode Now',
+                            style: TextStyle(fontSize: 16),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade700,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
               const Text(
                 'Auto Answer Service Status:',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
@@ -502,8 +564,8 @@ class _MyHomePageState extends State<MyHomePage> {
                         ],
                       ),
                       
-                      // Xiaomi-specific additional option
-                      if (_isXiaomiDevice && _speakerEnabled)
+                      // Xiaomi-specific additional option (but not F22 Pro which has its own section)
+                      if (_isXiaomiDevice && _speakerEnabled && !_isF22ProModel)
                         Padding(
                           padding: const EdgeInsets.only(top: 16.0),
                           child: Column(
